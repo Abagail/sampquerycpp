@@ -50,31 +50,31 @@ unsigned long long int Query::GetTickCount()
 
 std::string Query::Information(int timeout)
 {
-	if(Send('i') < 0) return NULL;
+	if(Send('i') < 0) return std::string("");
 	return Recv(timeout);
 }
 
 std::string Query::Rules(int timeout)
 {
-	if(Send('r') < 0) return NULL;
+	if(Send('r') < 0) return std::string("");
 	return Recv(timeout);
 }
 
 std::string Query::ClientList(int timeout)
 {
-	if(Send('c') < 0) return NULL;
+	if(Send('c') < 0) return std::string("");
 	return Recv(timeout);
 }
 
 std::string Query::DetailedPlayerInfo(int timeout)
 {
-	if(Send('d') < 0) return NULL;
+	if(Send('d') < 0) return std::string("");
 	return Recv(timeout);
 }
 
 std::string Query::Ping(std::string data, int timeout)
 {
-	if(Send('p', data) < 0) return NULL;
+	if(Send('p', data) < 0) return std::string("");
 	return Recv(timeout);
 }
 
@@ -90,7 +90,7 @@ int Query::Send(const char opcode, std::string data)
 
 std::string Query::Recv(int timeout)
 {
-	if(sock < 1) return NULL;
+	if(sock < 1) return std::string("");
 
 	std::string packet;
 	char cbuffer[512];
@@ -132,7 +132,7 @@ std::string Query::Recv(int timeout)
 
 std::string Query::Assemble(const char opcode, std::string data)
 {
-	if(sip.length() < 4 || sport < 1) return NULL;
+	if(sip.length() < 4 || sport < 1) return std::string("");
 
 	std::string packet("SAMP");
 
@@ -208,6 +208,109 @@ Query::Query(std::string ip, const short port)
 	server.sin_addr.s_addr = inet_addr(ip.c_str());
 
 	// For the sake of Assemble
+	sip.assign(ip);
+	sport = port;
+}
+
+bool validateIpAddress(const std::string &ipAddress)
+{
+    struct sockaddr_in sa;
+	sa.sin_addr.s_addr = inet_addr( ipAddress.c_str());
+	return sa.sin_addr.s_addr != -1;
+}
+
+Query::Query(std::string ip, const short port)
+{
+#ifdef WIN32
+	WSADATA wsa;
+	if(WSAStartup(MAKEWORD(2, 2), &wsa)) return; // Failed to start up WSA.
+#endif
+
+	sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if(sock < 1) // Failed to create socket.
+	{
+		std::cerr << "Failed to create socket.\n";
+		sock = 0;
+		#ifdef WIN32
+		WSACleanup();
+		#endif
+		return;
+	}
+
+#ifdef WIN32
+	DWORD toggle = 1;
+	if (ioctlsocket(sock, FIONBIO, &toggle) < 0)
+	{
+		std::cerr << "Failed to set socket to non-blocking.\n";
+		closesocket(sock);
+		sock = 0;
+		#ifdef WIN32
+		WSACleanup();
+		#endif
+		return;
+	}
+#else
+	int toggle = 1;
+	if (fcntl(sock, F_SETFL, O_NONBLOCK, toggle) < 0)
+	{
+		std::cerr << "Failed to set socket to non-blocking.\n";
+		closesocket(sock);
+		sock = 0;
+		#ifdef WIN32
+		WSACleanup();
+		#endif
+		return;
+	}
+#endif
+
+	memset((void*)&server, '\0', sizeof(sockaddr_in));
+
+	server.sin_family = AF_INET;
+	server.sin_port = htons(port);
+	if(validateIpAddress(ip)) {
+		server.sin_addr.s_addr = inet_addr(ip.c_str());
+		if (server.sin_addr.s_addr == -1) {
+			std::cerr << "Failed to connect ip.\n";
+			closesocket(sock);
+			sock = 0;
+			#ifdef WIN32
+			WSACleanup();
+			#endif
+		}		
+	} else {
+		struct hostent *_host = gethostbyname(ip.c_str());
+		if ( _host == NULL ) {
+			std::cerr << "Failed to get host.\n";
+			closesocket(sock);
+			sock = 0;
+			#ifdef WIN32
+			WSACleanup();
+			#endif
+			goto _lblAssign;
+		}
+		int i = 0;
+		bool _found = false;
+        if (_host->h_addrtype == AF_INET)
+        {
+            while (_host->h_addr_list[i] != 0) {
+                server.sin_addr.s_addr = *(u_long *) _host->h_addr_list[i++];
+                //printf ("\tIP Address #%d: %s\n", i, inet_ntoa(server.sin_addr));
+                _found = true;
+            }
+        }
+
+		if(!_found) {
+			std::cerr << "Failed to connect host.\n";
+			closesocket(sock);
+			sock = 0;
+			#ifdef WIN32
+			WSACleanup();
+			#endif
+		}
+	}
+
+	// For the sake of Assemble
+	_lblAssign:
 	sip.assign(ip);
 	sport = port;
 }
